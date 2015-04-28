@@ -1,0 +1,2 @@
+Scripts to start/stop/check all SQL Server services on many remote servers.
+Attention: the stop script also stop dependencies (e.g. it stops sql agents as well), but the start script doesn't, so you need to start the agents after you start the engines.
