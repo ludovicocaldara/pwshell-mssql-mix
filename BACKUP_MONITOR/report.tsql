@@ -1,0 +1,100 @@
+declare @tableHTML varchar(max),
+        @Email varchar(255),
+        @Subject varchar(255);
+ 
+SET @Email = 'your_mail@yourdomain.com'
+SET @Subject = 'Report backup SQL Server'
+ 
+/*
+######################
+# REPORT BACKUP FULL #
+######################
+*/
+set @tableHTML =
+    N'<html><body><h1>Backup full not completed within the defined threshold</h1>
+    <table border="1" width="100%">
+      <tr><b><th>Instance</th><th>Database</th><th>LastFull</th><th>Hours since Last Full</th></tr>
+'
+ 
+set @tableHTML = @tableHTML + isnull(CAST((
+        select
+        td = s.InstanceName, '',
+        td = s.DatabaseName,  '',
+        td = s.LastFull,  '',
+        td = floor(convert(int,convert(float,GETDATE()-LastFull)*24,0)), '
+        '
+from db_status s, DB_Backup_Exceptions e
+    where s.InstanceName like e.InstanceName and s.DatabaseName like e.DatabaseName
+    and (e.bestbefore is null or e.bestbefore > GETDATE())
+    and s.DatabaseStatus!='OFFLINE'
+group by s.InstanceName, s.DatabaseName, s.LastFull
+having LastFull < (GETDATE()-max(e.LastFullHours)/24.0)
+order by s.InstanceName, s.DatabaseName
+for XML path ('tr'), TYPE) AS NVARCHAR(MAX)),'');
+ 
+/*
+######################
+# REPORT BACKUP LOG  #
+######################
+*/
+SET @tableHTML = @tableHTML + N'
+    </table>
+    <BR/><BR/>
+    <h1>Backup log not completed within the defined threshold</h1>
+    <table border="1" width="100%">
+            <tr><b><th>Instance</th><th>Database</th><th>LastLog</th><th>Hours since Last Log</th></tr>
+';
+ 
+set @tableHTML = @tableHTML + isnull(CAST((
+    select
+        td = s.InstanceName, '',
+        td = s.DatabaseName, '',
+        td = s.LastLog, '',
+        td = floor(convert(int,convert(float,GETDATE()-LastLog)*24,0)), '
+        '
+    from db_status s, DB_Backup_Exceptions e
+        where s.InstanceName like e.InstanceName and s.DatabaseName like e.DatabaseName
+    and (e.bestbefore is null or e.bestbefore > GETDATE())
+    and s.DatabaseStatus!='OFFLINE' and s.RecoveryMode='FULL'
+    group by s.InstanceName, s.DatabaseName, s.LastLog
+    having LastLog < (GETDATE()-max(e.LastLogHours)/24.0)
+    order by s.InstanceName, s.DatabaseName
+for XML path ('tr'), TYPE) AS NVARCHAR(MAX)),'');
+ 
+/*
+###################
+# LIST EXEPTIONS  #
+###################
+*/
+SET @tableHTML = @tableHTML + N'
+    </table>
+    <BR/><BR/>
+    <h1>List of exceptions currently defined</h1>
+    <table border="1" width="100%">
+            <tr><b><th>Instance</th><th>Database</th><th>LastFullHours</th><th>LastLogHours</th><th>Description</th><th>BestBefore</th></tr>
+';
+ 
+set @tableHTML = @tableHTML + CAST((
+    select
+        td = InstanceName, '',
+        td = DatabaseName, '',
+        td = LastFullHours, '',
+        td = LastLogHours, '',
+        td = Description, '',
+        td = ISNULL(convert(varchar,bestbefore,127), 'never'), ''
+    from DB_Backup_Exceptions
+    where (bestbefore is null or bestbefore > GETDATE())
+    order by InstanceName, DatabaseName
+for XML path ('tr'), TYPE) AS NVARCHAR(MAX));
+ 
+SET @tableHTML = @tableHTML + N'
+    </table>
+<br/><br/>
+<font size="3">Information message. Please do not reply to this email.</h1></body></html>';
+ 
+EXEC msdb.dbo.sp_send_dbmail
+@recipients        = @Email,
+@subject        = @Subject,
+@body            = @tableHTML,
+@body_format    = 'HTML',
+@profile_name    = 'DBA'
